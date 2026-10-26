@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>年金受給額 年齢別シミュレーター</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-sky-50 min-h-screen">
+  <div class="max-w-4xl mx-auto px-4 py-8">
+    <h1 class="text-3xl font-bold text-gray-800 mb-1">年金受給額 年齢別シミュレーター</h1>
+    <p class="text-gray-500 mb-6 text-sm">老齢基礎年金 ＋ 厚生年金の概算受給額を繰上・繰下で比較します</p>
+
+    <!-- Inputs -->
+    <div class="bg-white rounded-2xl shadow p-6 mb-6 grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div>
+        <label class="text-sm font-semibold text-gray-700 mb-1 block">国民年金加入年数（0〜40）</label>
+        <input id="basicYears" type="number" value="40" min="0" max="40" oninput="simulate()"
+          class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-sky-400">
+      </div>
+      <div>
+        <label class="text-sm font-semibold text-gray-700 mb-1 block">厚生年金加入年数（0〜45）</label>
+        <input id="kosei" type="number" value="35" min="0" max="45" oninput="simulate()"
+          class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-sky-400">
+      </div>
+      <div>
+        <label class="text-sm font-semibold text-gray-700 mb-1 block">平均年収（万円）</label>
+        <input id="avgIncome" type="number" value="500" min="0" max="3000" oninput="simulate()"
+          class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-sky-400">
+      </div>
+    </div>
+
+    <!-- Results table -->
+    <div class="bg-white rounded-2xl shadow p-6 mb-6 overflow-x-auto">
+      <h2 class="font-bold text-gray-700 mb-4">受給開始年齢別 月額・年額一覧</h2>
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="bg-sky-50 text-sky-700">
+            <th class="px-3 py-2 text-left rounded-l-lg">受給開始年齢</th>
+            <th class="px-3 py-2 text-right">調整率</th>
+            <th class="px-3 py-2 text-right">月額 (円)</th>
+            <th class="px-3 py-2 text-right rounded-r-lg">年額 (万円)</th>
+          </tr>
+        </thead>
+        <tbody id="tableBody" class="divide-y divide-gray-50"></tbody>
+      </table>
+    </div>
+
+    <!-- Break-even -->
+    <div class="bg-white rounded-2xl shadow p-6 mb-6">
+      <h2 class="font-bold text-gray-700 mb-3">損益分岐点（対65歳受給）</h2>
+      <div id="breakeven" class="grid grid-cols-1 sm:grid-cols-2 gap-4"></div>
+    </div>
+
+    <!-- Bar chart -->
+    <div class="bg-white rounded-2xl shadow p-6">
+      <h2 class="font-bold text-gray-700 mb-4">棒グラフ比較（年額）</h2>
+      <div id="barChart" class="space-y-2"></div>
+    </div>
+
+    <p class="text-xs text-gray-400 text-center mt-6">※ 2024年度概算値をベースにした簡易シミュレーション。実際の年金額は日本年金機構でご確認ください。</p>
+  </div>
+
+  <script>
+    // 2024年度 老齢基礎年金 満額 = 816,000円/年
+    const BASIC_MAX = 816000;
+    // 厚生年金: 標準的な計算 (報酬比例部分)
+    // 概算式: 平均標準報酬月額 × 5.481/1000 × 加入月数
+    // 平均標準報酬 ≒ 平均年収/12 × 0.85 (賞与考慮係数)
+
+    function calcBase(basicYears, kosei, avgIncome) {
+      const basicYr = Math.min(Math.max(basicYears, 0), 40);
+      const koseiYr = Math.min(Math.max(kosei, 0), 45);
+      const income = Math.max(avgIncome, 0) * 10000; // 円
+
+      // 老齢基礎年金
+      const basicPension = BASIC_MAX * (basicYr / 40);
+
+      // 厚生年金 報酬比例部分
+      const avgMonthlySalary = income / 12 * 0.85; // 賞与込み係数
+      const koseiMonths = koseiYr * 12;
+      const koseiPension = avgMonthlySalary * (5.481 / 1000) * koseiMonths;
+
+      return { basicPension, koseiPension, total: basicPension + koseiPension };
+    }
+
+    function adjustRate(age) {
+      if (age === 65) return 1;
+      if (age < 65) {
+        // 繰上: 0.4%/月減額
+        const months = (65 - age) * 12;
+        return 1 - 0.004 * months;
+      } else {
+        // 繰下: 0.7%/月増額
+        const months = (age - 65) * 12;
+        return 1 + 0.007 * months;
+      }
+    }
+
+    function simulate() {
+      const basicYears = parseFloat(document.getElementById('basicYears').value) || 40;
+      const kosei = parseFloat(document.getElementById('kosei').value) || 35;
+      const avgIncome = parseFloat(document.getElementById('avgIncome').value) || 500;
+
+      const base = calcBase(basicYears, kosei, avgIncome);
+      const base65 = base.total;
+
+      const ages = [60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75];
+      const rows = ages.map(age => {
+        const rate = adjustRate(age);
+        const annual = base65 * rate;
+        return { age, rate, monthly: annual / 12, annual };
+      });
+
+      // Table
+      const tbody = document.getElementById('tableBody');
+      tbody.innerHTML = rows.map(r => {
+        const highlight = r.age === 65 ? 'bg-sky-50 font-semibold' : '';
+        const rateColor = r.age < 65 ? 'text-red-500' : r.age > 65 ? 'text-green-600' : 'text-gray-700';
+        return `<tr class="${highlight}">
+          <td class="px-3 py-2">${r.age}歳${r.age === 65 ? ' <span class="text-xs bg-sky-200 text-sky-700 px-1 rounded">標準</span>' : ''}</td>
+          <td class="px-3 py-2 text-right ${rateColor}">${(r.rate * 100).toFixed(1)}%</td>
+          <td class="px-3 py-2 text-right">${Math.round(r.monthly).toLocaleString()}</td>
+          <td class="px-3 py-2 text-right">${(r.annual / 10000).toFixed(1)}</td>
+        </tr>`;
+      }).join('');
+
+      // Break-even
+      const r65 = rows.find(r => r.age === 65);
+      const breakevens = [];
+      rows.filter(r => r.age !== 65).forEach(r => {
+        if (r.age < 65) {
+          // 繰上: early start but lower amount
+          const startDiff = (65 - r.age) * 12; // 先に受け取れる月数
+          const monthlyDiff = r65.monthly - r.monthly; // 差額 (positive = less)
+          if (monthlyDiff > 0) {
+            const months = (r65.monthly * startDiff) / monthlyDiff;
+            const beAge = Math.round(r.age + months / 12);
+            breakevens.push({ age: r.age, type: '繰上', beAge });
+          }
+        } else {
+          // 繰下: delayed start but higher amount
+          const waitMonths = (r.age - 65) * 12;
+          const monthlyGain = r.monthly - r65.monthly;
+          if (monthlyGain > 0) {
+            const months = (r65.monthly * waitMonths) / monthlyGain;
+            const beAge = Math.round(r.age + months / 12);
+            breakevens.push({ age: r.age, type: '繰下', beAge });
+          }
+        }
+      });
+
+      document.getElementById('breakeven').innerHTML = [60,62,64,66,68,70,72,75]
+        .map(a => breakevens.find(b => b.age === a))
+        .filter(Boolean)
+        .map(b => `
+          <div class="flex items-center justify-between bg-gray-50 rounded-xl px-4 py-3">
+            <span class="text-sm text-gray-600">${b.age}歳${b.type}受給</span>
+            <span class="text-sm font-bold ${b.type==='繰下' ? 'text-green-600' : 'text-red-500'}">${b.beAge}歳で損益分岐</span>
+          </div>
+        `).join('');
+
+      // Bar chart
+      const maxAnnual = Math.max(...rows.map(r => r.annual));
+      document.getElementById('barChart').innerHTML = rows.map(r => {
+        const pct = (r.annual / maxAnnual * 100).toFixed(1);
+        const color = r.age < 65 ? 'bg-red-400' : r.age === 65 ? 'bg-sky-500' : 'bg-green-500';
+        return `
+          <div class="flex items-center gap-3">
+            <span class="text-xs text-gray-500 w-12 text-right">${r.age}歳</span>
+            <div class="flex-1 bg-gray-100 rounded-full h-5 overflow-hidden">
+              <div class="${color} h-full rounded-full transition-all duration-500" style="width:${pct}%"></div>
+            </div>
+            <span class="text-xs text-gray-700 w-20 text-right font-mono">${(r.annual / 10000).toFixed(1)}万円</span>
+          </div>
+        `;
+      }).join('');
+    }
+
+    simulate();
+  </script>
+</body>
+</html>
